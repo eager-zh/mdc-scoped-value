@@ -1,0 +1,10 @@
+<configuration>
+    <appender name="stdout" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>%-4r [%t] %5p %c{1} - %m - reqId=%X{requestId} tname=%X{threadName} %n</pattern>
+	</encoder>
+    </appender>
+    <root level="INFO">
+        <appender-ref ref="stdout" />
+    </root>
+</configuration>
