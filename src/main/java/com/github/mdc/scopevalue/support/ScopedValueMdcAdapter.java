@@ -7,7 +7,6 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Stream;
 
 import org.slf4j.MDC;
 import org.slf4j.spi.MDCAdapter;
@@ -15,37 +14,53 @@ import org.slf4j.spi.MDCAdapter;
 import ch.qos.logback.classic.util.LogbackMDCAdapter;
 
 /**
- * Custom {@link MDCAdapter} which allows to store MDC values in {@link ScopedValue}.
+ * An implementation of {@link MDCAdapter} which allows to store and access MDC context by subtasks, 
+ * created by {@link java.util.concurrent.StructuredTaskScope#fork(java.util.concurrent.Callable) StructuredTaskScope.fork}
+ * , or, in general, by a thread, started by {@link java.lang.ScopedValue.Carrier#run(Runnable) ScopedValue.Carrier.run} method.
  * Initially, until {@link #runWhere(Runnable)} method is called, the class redirects all the invocations 
- * to an ordinary {@link LogbackMDCAdapter} instance, stored in {@link #fallbackMdcAdapter} field.
- * When @link #runWhere(Runnable)} method is called, the MDC context of this adapter 
- * is copied into the {@link ScopedValue}-bound instance of {@link MdcScopedValue}. 
- * Since then and until {@link #SCOPED_VALUE} remains bound, the changes to MDC context
+ * to an instance of {@link MDCAdapter}, stored in {@link #rootContext} field.
+ * When {@link #runWhere(Runnable)} method is called, the <i>root</i>MDC context of this adapter 
+ * is copied into the {@link ScopedValue}-bound instance of {@link SubtaskContext}. 
+ * Since then and until {@link #SUBTASK_CONTEXT} remains bound, the changes to MDC context
  * (methods {@link #put(String, String)}, {@link #clear()}, {@link #remove(String)}, {@link #pushByKey(String, String)}, 
  * {@link #popByKey(String)}, {@link #clearDequeByKey(String)}, {@link #setContextMap(Map)}) do not propagate 
- * to the "parent" {@link #fallbackMdcAdapter} context, i.e. remain "local" to this {@link ScopedValue}.
+ * to the "parent" {@link #rootContext} context, i.e. remain "local" to this {@link ScopedValue}.
  * 
- * <br/><br/>This is an internal class which is not supposed to be used directly by a developer.
+ * <br/><br/>This is an internal class and it is not supposed to be used directly by a developer.
  * Instead, a developer is supposed to use {@link ScopedValueMdc} utility class.
  * 
- * <br/><br/>This {@link MDCAdapter} has to be registered as a {@link org.slf4j.spi.SLF4JServiceProvider SLF4JServiceProvider},
+ * <br/><br/>This {@link MDCAdapter} has to be registered by a {@link org.slf4j.spi.SLF4JServiceProvider SLF4JServiceProvider},
  * for example, by {@link ScopedValueServiceProvider}. 
  * 
+ * 
+ * @see java.util.concurrent.StructuredTaskScope StructuredTaskScope
+ * @see java.lang.ScopedValue ScopedValue
+ * @see java.lang.ScopedValue.Carrier ScopedValue.Carrier
  * @see ScopedValueServiceProvider
  * @see ScopedValueMdc
  */
 class ScopedValueMdcAdapter implements MDCAdapter {
 	
-	private static class MdcScopedValue implements MDCAdapter {
+	/**
+	 * An implementation of {@link MDCAdapter} which stores MDC context 
+	 * in fields {@link #values} and {@link #deques}.
+	 * Upon constructing it copies the MDC context from current {@link MDCAdapter},
+	 * which is expected to be of type {@link ScopedValueMdcAdapter}.
+	 */
+	private static class SubtaskContext implements MDCAdapter {
 		
 		private final Map<String, String> values = new HashMap<>();
 		private final Map<String, Deque<String>> deques = new HashMap<>();
 		
-		public MdcScopedValue() {
+		public SubtaskContext() {
+			copyFromRoot();
+		}
+
+		private void copyFromRoot() throws InternalError {
 			values.putAll(MDC.getCopyOfContextMap());
 			final MDCAdapter mdcAdapter = MDC.getMDCAdapter();
 			if (!(mdcAdapter instanceof ScopedValueMdcAdapter)) {
-				throw new InternalError("MDCAdapter supposed to be of type " + ScopedValueMdcAdapter.class.getSimpleName() +
+				throw new IllegalStateException("MDC Adapter supposed to be of type " + ScopedValueMdcAdapter.class.getSimpleName() +
 						", actual type is " + (mdcAdapter != null ? mdcAdapter.getClass().getSimpleName() : "<null>"));
 			}
 			final ScopedValueMdcAdapter scopedValueMdcAdapter = (ScopedValueMdcAdapter) mdcAdapter;
@@ -111,80 +126,88 @@ class ScopedValueMdcAdapter implements MDCAdapter {
 		}
 	}
 	
-	private static final ScopedValue<MdcScopedValue> SCOPED_VALUE = ScopedValue.newInstance();
+	/**
+	 * Stores {@link SubtaskContext} MDC context bound to a current thread
+	 * by {@link ScopedValue#runWhere(ScopedValue, Object, Runnable)} method.
+	 */
+	private static final ScopedValue<SubtaskContext> SUBTASK_CONTEXT = ScopedValue.newInstance();
 	
+	/**
+	 * Run an operation operation {@code op} bound to {@link SUBTASK_CONTEXT} value.
+	 * It is a convenient wrapper over @link ScopedValue#runWhere(ScopedValue, Object, Runnable)} method.
+	 */
 	static void runWhere(Runnable op) {
-		ScopedValue.runWhere(SCOPED_VALUE, new MdcScopedValue(), op);
+		ScopedValue.runWhere(SUBTASK_CONTEXT, new SubtaskContext(), op);
 	}
 	
-	private final MDCAdapter fallbackMdcAdapter = new LogbackMDCAdapter();
+	/**
+	 * Root {@link MDCAdapter}. It is used when {@link #SUBTASK_CONTEXT} is not bound to current thread 
+	 */
+	private final MDCAdapter rootContext = new LogbackMDCAdapter();
 	
+	/** {@link Deque} keys stored by {@link #pushByKey(String, String)} method. 
+	 * They will later be used to retrieve context values saved in {@link Deque}s
+	 */
 	private final Set<String> dequeKeys = new HashSet<>();
 
 	@Override
 	public void put(String key, String val) {
-		getCurrentMdcAdapter().put(key, val);
+		getCurrentContext().put(key, val);
 	}
 
 	@Override
 	public String get(String key) {
-		return getCurrentMdcAdapter().get(key);
+		return getCurrentContext().get(key);
 	}
 	
 	@Override
 	public void remove(String key) {
-		getCurrentMdcAdapter().remove(key);
+		getCurrentContext().remove(key);
 	}
 
 	@Override
 	public void clear() {
-		getCurrentMdcAdapter().clear();
+		getCurrentContext().clear();
 	}
 
 	@Override
 	public Map<String, String> getCopyOfContextMap() {
 		final Map<String, String> contextMap = new HashMap<>();
-		getMdcAdapters().forEach(a -> {
-			final Map<String, String> copyOfContextMap = a.getCopyOfContextMap();
-			if (copyOfContextMap != null) {
-				contextMap.putAll(copyOfContextMap);
-			}
-		});
+		final Map<String, String> copyOfContextMap = getCurrentContext().getCopyOfContextMap();
+		if (copyOfContextMap != null) {
+			contextMap.putAll(copyOfContextMap);
+		}
 		return Collections.unmodifiableMap(contextMap);
 	}
 
 	@Override
 	public void setContextMap(Map<String, String> contextMap) {
-		getCurrentMdcAdapter().setContextMap(contextMap);
+		getCurrentContext().setContextMap(contextMap);
 	}
 
 	@Override
 	public void pushByKey(String key, String value) {
 		dequeKeys.add(key);
-		getCurrentMdcAdapter().pushByKey(key, value);
+		getCurrentContext().pushByKey(key, value);
 	}
 
 	@Override
 	public String popByKey(String key) {
-		return getCurrentMdcAdapter().popByKey(key);
+		return getCurrentContext().popByKey(key);
 	}
 
 	@Override
 	public Deque<String> getCopyOfDequeByKey(String key) {
-		return getCurrentMdcAdapter().getCopyOfDequeByKey(key);
+		return getCurrentContext().getCopyOfDequeByKey(key);
 	}
 
 	@Override
 	public void clearDequeByKey(String key) {
-		getCurrentMdcAdapter().clearDequeByKey(key);
+		getCurrentContext().clearDequeByKey(key);
 	}
 	
-	private MDCAdapter getCurrentMdcAdapter() {
-		return SCOPED_VALUE.isBound() ? SCOPED_VALUE.get() : fallbackMdcAdapter;
+	private MDCAdapter getCurrentContext() {
+		return SUBTASK_CONTEXT.isBound() ? SUBTASK_CONTEXT.get() : rootContext;
 	}
 	
-	private Stream<MDCAdapter> getMdcAdapters() {
-		return SCOPED_VALUE.isBound() ? Stream.of(SCOPED_VALUE.get(), fallbackMdcAdapter) : Stream.of(fallbackMdcAdapter);
-	}
-
 }
