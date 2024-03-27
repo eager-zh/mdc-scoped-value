@@ -32,7 +32,6 @@ import ch.qos.logback.classic.util.LogbackMDCAdapter;
  * <br/><br/>This {@link MDCAdapter} has to be registered by a {@link org.slf4j.spi.SLF4JServiceProvider SLF4JServiceProvider},
  * for example, by {@link ScopedValueServiceProvider}. 
  * 
- * 
  * @see java.util.concurrent.StructuredTaskScope StructuredTaskScope
  * @see java.lang.ScopedValue ScopedValue
  * @see java.lang.ScopedValue.Carrier ScopedValue.Carrier
@@ -143,7 +142,7 @@ class ScopedValueMdcAdapter implements MDCAdapter {
 	/**
 	 * Root {@link MDCAdapter}. It is used when {@link #SUBTASK_CONTEXT} is not bound to current thread 
 	 */
-	private final MDCAdapter rootContext = new LogbackMDCAdapter();
+	private MDCAdapter rootContext = new LogbackMDCAdapter();
 	
 	/** {@link Deque} keys stored by {@link #pushByKey(String, String)} method. 
 	 * They will later be used to retrieve context values saved in {@link Deque}s
@@ -208,6 +207,14 @@ class ScopedValueMdcAdapter implements MDCAdapter {
 	
 	private MDCAdapter getCurrentContext() {
 		return SUBTASK_CONTEXT.isBound() ? SUBTASK_CONTEXT.get() : rootContext;
+	}
+
+	public MDCAdapter getRootContext() {
+		return rootContext;
+	}
+
+	public void setRootContext(MDCAdapter rootContext) {
+		this.rootContext = rootContext;
 	}
 	
 }
