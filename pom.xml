@@ -10,7 +10,6 @@
 		<java.version>21</java.version>
 	</properties>
 
-
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
@@ -31,22 +30,41 @@
 			<scope>test</scope>
 		</dependency>
 
-
 	</dependencies>
 
 	<build>
 		<plugins>
+
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<configuration>
+					<release>${java.version}</release>
+					<enablePreview>true</enablePreview>
+				</configuration>
+			</plugin>
+
 			<plugin>
 				<groupId>org.codehaus.mojo</groupId>
 				<artifactId>exec-maven-plugin</artifactId>
 				<version>3.1.0</version>
 				<configuration>
-					<mainClass>
-						com.github.mdc.scopedvalue.MdcScopedValueApplication</mainClass>
+					<executable>java</executable>
 					<arguments>
-						<argument>
-							-Dslf4j.provider=com.github.mdc.scopevalue.support.ScopedValueServiceProvider</argument>
+						<argument>--enable-preview</argument>
+						<argument>-classpath</argument>
+						<classpath />
+						<argument>com.github.mdc.scopedvalue.MdcScopedValueApplication</argument>
 					</arguments>
+				</configuration>
+			</plugin>
+
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<version>2.22.2</version>
+				<configuration>
+					<argLine>--enable-preview</argLine>
 				</configuration>
 			</plugin>
 
@@ -54,8 +72,8 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
+			
 		</plugins>
 	</build>
-
 
 </project>
