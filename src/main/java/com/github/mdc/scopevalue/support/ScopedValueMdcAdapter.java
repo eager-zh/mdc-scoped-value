@@ -121,7 +121,7 @@ class ScopedValueMdcAdapter implements MDCAdapter {
 		}
 		
 		private Deque<String> getDequeByKey(String key) {
-			return deques.putIfAbsent(key, new LinkedList<>());
+			return deques.computeIfAbsent(key, (k) -> new LinkedList<>());
 		}
 	}
 	
